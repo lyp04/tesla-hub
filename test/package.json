@@ -1,0 +1,1 @@
+{ "private": true, "name": "tesla-hub-test", "dependencies": { "playwright": "1.49.1" } }
