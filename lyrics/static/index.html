@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>正在播放</title>
+<style>
+/* Shares its look with the in-car menu (menu/index.html): same background, surfaces and
+   touch sizes. Controls are sized for a car touchscreen (48px targets). */
+:root{color-scheme:light dark; --accent:#1db954;
+ --fg:#f3f5f8; --dim:#8d95a3; --bg:#07090d; --page-bg:radial-gradient(120% 90% at 50% -10%,#151a24 0%,var(--bg) 62%);
+ --line:#5b616a; --line-cur:#fff; --panel:rgba(255,255,255,.05); --panel-border:rgba(255,255,255,.09); --bar-bg:rgba(255,255,255,.08);
+ --seg-bg:rgba(255,255,255,.06); --button-bg:rgba(255,255,255,.06); --button-border:rgba(255,255,255,.12); --button-active:rgba(255,255,255,.14); --active-fg:#06210f; --note:#4a4f57; --label:#8d95a3;
+ --pop-bg:#11151c; --ring:#7cc4ff}
+@media (prefers-color-scheme: light){:root{color-scheme:light; --fg:#10141b; --dim:#5b6472; --bg:#eef1f6; --page-bg:radial-gradient(120% 90% at 50% -10%,#fff 0%,var(--bg) 62%);
+ --line:#a2a9b3; --line-cur:#0d1117; --panel:rgba(0,0,0,.04); --panel-border:rgba(0,0,0,.08); --bar-bg:rgba(0,0,0,.08);
+ --seg-bg:rgba(0,0,0,.055); --button-bg:rgba(0,0,0,.04); --button-border:rgba(0,0,0,.12); --button-active:rgba(0,0,0,.10); --active-fg:#fff; --note:#7a828d; --label:#5b6472;
+ --pop-bg:#fff; --ring:#1d6fd6}}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{background:var(--page-bg);color:var(--fg);
+ font-family:-apple-system,"PingFang SC","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+ display:flex;flex-direction:column;overflow:hidden}
+#hdr{padding:14px 22px 8px;text-align:center;flex:0 0 auto}
+/* song title / artist / album are intentionally hidden from the top of the page
+   (still available in the 「歌词信息」 popup); only the progress bar stays up top. */
+#title,#meta,#realsrc{display:none}
+#bar{height:4px;background:var(--bar-bg);border-radius:4px;margin:14px 32px 0;overflow:hidden}
+#barfill{height:100%;width:0;background:var(--accent);border-radius:4px;transition:width .25s linear}
+#lyrics{flex:1 1 auto;overflow:hidden;position:relative;
+ -webkit-mask-image:linear-gradient(transparent,#000 16%,#000 76%,transparent);
+ mask-image:linear-gradient(transparent,#000 16%,#000 76%,transparent)}
+#scroll{position:absolute;left:0;right:0;top:50%;transition:transform .5s cubic-bezier(.22,.7,.16,1);will-change:transform}
+.ln{padding:12px 48px;text-align:left;font-size:clamp(30px,8vw,48px);color:var(--line);line-height:1.25;font-weight:700;
+ transition:color .28s,opacity .28s,transform .28s;opacity:.5;transform-origin:left center}
+.ln.cur{color:var(--line-cur);opacity:1;transform:scale(1.04)}
+#hint{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;
+ color:var(--dim);font-size:20px;padding:30px}
+#ctl{flex:0 0 auto;position:relative;display:flex;align-items:center;justify-content:center;gap:16px;
+ padding:14px 24px calc(14px + env(safe-area-inset-bottom));background:var(--panel);
+ border-top:1px solid var(--panel-border);font-size:16px;color:var(--dim);flex-wrap:wrap;min-height:76px}
+button,#home{font:inherit}
+button:focus-visible,#home:focus-visible{outline:3px solid var(--ring);outline-offset:2px}
+#home{position:absolute;left:20px;top:50%;transform:translateY(-50%);display:inline-flex;align-items:center;gap:8px;
+ height:48px;padding:0 18px 0 12px;border-radius:14px;border:1px solid var(--button-border);background:var(--button-bg);
+ color:var(--fg);text-decoration:none;font-size:16px;font-weight:600}
+#home svg{width:24px;height:24px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#home:active{background:var(--button-active)}
+.seg{display:inline-flex;background:var(--seg-bg);border-radius:14px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--dim);min-height:48px;padding:0 16px;font-size:16px;cursor:pointer}
+.seg button.on{background:var(--accent);color:var(--active-fg);font-weight:700}
+.info{position:relative;display:inline-flex}
+.info button{border:1px solid var(--button-border);border-radius:14px;background:var(--button-bg);color:var(--fg);
+ min-height:48px;padding:0 20px;font-size:16px;font-weight:600;cursor:pointer;min-width:128px;text-align:center}
+.info button:active{background:var(--button-active)}
+#infopanel,#srcpanel{display:none;position:absolute;left:0;bottom:60px;min-width:280px;max-width:min(400px,92vw);z-index:4;
+ max-height:min(76vh,600px);
+ padding:16px 18px;border:1px solid var(--panel-border);border-radius:18px;background:var(--pop-bg);color:var(--fg);
+ box-shadow:0 18px 48px rgba(0,0,0,.4);font-size:16px;line-height:1.6;text-align:left}
+#infopanel.show,#srcpanel.show{display:flex;flex-direction:column}
+#infohead{flex:0 0 auto}
+#gstep{flex:0 0 auto;margin-top:12px;padding-top:12px;border-top:1px solid var(--panel-border)}
+#gstep .row{display:flex;align-items:center;gap:10px}
+#gstep .row .lbl{flex:1 1 auto;font-size:16px;color:var(--fg);white-space:nowrap}
+#gstep .row button{flex:0 0 auto;width:48px;height:48px;min-width:0;min-height:0;padding:0;border-radius:50%;font-size:22px;font-weight:400}
+#gstep #goff{flex:0 0 auto;min-width:60px;text-align:center;font-variant-numeric:tabular-nums}
+#gstep .hint{margin-top:4px;font-size:13px;color:var(--dim)}
+/* filter chips sit on their own line(s) above the list, free to wrap to two rows */
+#candbar{flex:0 0 auto;margin-bottom:10px}
+#candbar b{display:block;margin-bottom:8px}
+#candfilter{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.fchip{border:1px solid var(--button-border);background:var(--button-bg);color:var(--dim);border-radius:12px;
+ min-height:44px;padding:0 12px;font-size:15px;cursor:pointer;line-height:1.3;text-align:center}
+.fchip.on{background:var(--accent);color:var(--active-fg);border-color:var(--accent);font-weight:700}
+/* candidate list: scrollable SINGLE column (full-width rows so info isn't cut off) */
+#candwrap{flex:1 1 auto;overflow-y:auto;-webkit-overflow-scrolling:touch;min-height:38px}
+#candwrap .status{padding:6px 2px}
+#reportbtn{flex:0 0 auto;margin-top:12px;width:100%;border:1px solid var(--button-border);background:var(--button-bg);
+ color:var(--fg);border-radius:14px;min-height:48px;padding:0 12px;font-size:16px;cursor:pointer}
+#reportbtn:active{background:var(--button-active)}
+#reportmsg{flex:0 0 auto;margin-top:6px;color:var(--dim);font-size:13px;text-align:center;min-height:14px}
+#infopanel .dim,#srcpanel .dim{color:var(--dim)}
+.cand{display:block;width:100%;margin:8px 0 0;padding:12px 14px;border:1px solid var(--button-border);border-radius:14px;
+ background:var(--button-bg);color:var(--fg);text-align:left;font-size:15px;line-height:1.45;cursor:pointer;word-break:break-word}
+.cand.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.cand:active{background:var(--button-active)}
+.step{display:inline-flex;align-items:center;gap:10px}
+.step button{width:48px;height:48px;border-radius:50%;border:1px solid var(--button-border);
+ background:var(--button-bg);color:var(--fg);font-size:24px;cursor:pointer;line-height:1}
+.step button:active{background:var(--button-active)}
+#off,#goff{min-width:60px;text-align:center;font-variant-numeric:tabular-nums;color:var(--fg)}
+.lbl{color:var(--label);font-size:14px}
+/* furigana ruby + per-line translation rendered inside each .ln */
+.ln ruby{ruby-position:over;-webkit-ruby-position:over;ruby-align:center}
+.ln rt{font-size:.4em;font-weight:600;color:var(--dim);line-height:1.05;letter-spacing:.01em;
+ -webkit-user-select:none;user-select:none}
+.ln .tr{display:block;margin-top:7px;font-size:.46em;font-weight:600;color:var(--dim);line-height:1.25;opacity:.92}
+.tgl{border:1px solid var(--button-border);border-radius:14px;background:var(--button-bg);color:var(--fg);
+ min-height:48px;padding:0 20px;font-size:16px;font-weight:600;cursor:pointer}
+.tgl.on{background:var(--accent);color:var(--active-fg);border-color:var(--accent);font-weight:700}
+.tgl:disabled{opacity:.45;cursor:default}
+.tgl:active{background:var(--button-active)}
+@media (max-width:900px){#home span{display:none}#home{padding:0 12px}}
+</style></head>
+<body>
+<div id="hdr"><div id="title">—</div><div id="meta"></div><div id="bar"><div id="barfill"></div></div></div>
+<div id="lyrics"><div id="scroll"></div><div id="hint">等待车辆播放音乐…</div></div>
+<div id="ctl">
+  <a id="home" href="/" aria-label="返回菜单"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg><span>菜单</span></a>
+  <span class="info">
+    <button id="infobtn">歌词信息</button>
+    <span id="infopanel"></span>
+  </span>
+  <span class="info">
+    <button id="srcbtn">可选歌词源</button>
+    <span id="srcpanel"></span>
+  </span>
+  <button id="trbtn" class="tgl" style="display:none">翻译</button>
+  <span class="step"><span class="lbl">微调</span>
+    <button id="om">−</button><span id="off">0.0s</span><button id="op">+</button>
+  </span>
+</div>
+<script>
+const STEP = 0.5, LEAD = 0.6, SEEK_BACK_S = 5.0;
+// LEAD compensates normal display latency. Smaller backward clock corrections
+// are accepted, but the visible lyric line waits for playback to catch up.
+const QS = new URLSearchParams(location.search);
+const MOCK = QS.has("mock");
+const REPORTS_ENABLED = /*REPORTS*/false;   // the server turns this on when reports are configured
+const MOCK_ENGLISH = QS.has("eng");
+const MOCK_STARTED_AT = performance.now()/1000;
+const MOCK_DURATION = 270;
+const MOCK_LINES = [[5,"示例歌词第一行"],[11,"示例歌词第二行"],[17,"A neutral demo lyric"],[23,"タイミング表示のサンプル"],[31,"示例歌词第五行"],[37,"Another placeholder line"],[45,"仅用于界面与同步测试"],[51,"No real song text is bundled"]];
+let st=null, base={elapsed:0,at:0,playing:false};
+let lyrics=[], curKey="", curIdx=-1;
+let allowLyricRewind=false, lastStateTs=NaN, pollRequestId=0, stateFailures=0;
+let songGeneration=0, lyricRequestId=0, candidateRequestId=0, translationRequestId=0;
+let furigana=[], translations=[], showTrans=false, transLoading=false, transKey="";
+let curTitle="", curArtist="", curSource="auto", curOffset=0;
+// Added to every song on top of its own 微调 (saved on the server, same sign: + = later).
+let globalOffset=0;
+let lyricInfo={source:"—",found:false,lineCount:0,duration:0,title:"",artist:"",album:""};
+let candidates=[], candLoaded=false, candLoading=false, candError=false, candFilter="all";
+const $=id=>document.getElementById(id);
+const keyOf=d=>(d.title||"")+"|"+(d.artist||"");
+// (storage key kept from the earlier project name, so saved per-song settings survive)
+const prefStorageKey=(title,artist)=>"tesla-nowplaying:prefs:v1:"+(title||"").trim().toLowerCase()+"|"+(artist||"").trim().toLowerCase();
+
+// Consecutive failed state polls tolerated before the page mentions it.
+const STATE_FAIL_HINT_AFTER=4;
+// Every endpoint answers with JSON, so a non-2xx body is something else entirely:
+// a proxy error page, a rate-limit page, or a redirect to a login form. Reject it
+// here instead of letting response.json() throw inside a caller that only meant to
+// shrug off malformed data.
+async function getJSON(url,opts){
+  const r=await fetch(url,opts);
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+function readLocalPref(title,artist){
+  try{ const p=JSON.parse(localStorage.getItem(prefStorageKey(title,artist))||"null");
+    if(p && typeof p.source==="string" && Number.isFinite(+p.offset)) return {source:p.source,offset:Math.max(-10,Math.min(10,+p.offset))};
+  }catch(e){} return null;
+}
+function writeLocalPref(title,artist,source,offset){
+  try{ const k=prefStorageKey(title,artist); if(source==="auto" && +offset===0) localStorage.removeItem(k);
+    else localStorage.setItem(k,JSON.stringify({source,offset:+offset||0})); }catch(e){}
+}
+const sourceName=s=>({musixmatch:"Musixmatch",lrclib:"LRCLIB",petitlyrics:"PetitLyrics",netease:"网易云",kugou:"酷狗",instrumental:"纯音乐",auto:"自动",mock:"Mock"}[(s||"").split(":")[0]]||s||"—");
+function fmtTime(sec){ sec=Math.max(0,Math.round(+sec||0)); return Math.floor(sec/60)+":"+String(sec%60).padStart(2,"0"); }
+function esc(s){ return String(s||"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+function isStaleStateTimestamp(nextTs,previousTs){
+  return Number.isFinite(nextTs) && Number.isFinite(previousTs) && nextTs<=previousTs;
+}
+function shouldAllowLyricRewind(projectedElapsed,incomingElapsed,threshold){
+  return projectedElapsed-incomingElapsed>=threshold;
+}
+function lyricIndexFor(lines,lyricTime,currentIdx,allowBackward){
+  let idx=-1;
+  for(let i=0;i<lines.length;i++){ if(lines[i][0]<=lyricTime) idx=i; else break; }
+  return (!allowBackward && idx<currentIdx) ? currentIdx : idx;
+}
+function clearCurrentSong(){
+  songGeneration+=1; lyricRequestId+=1; candidateRequestId+=1;
+  candLoading=false; candLoaded=false; candError=false; candFilter="all"; candidates=[]; renderCands();
+  curKey=""; curTitle=""; curArtist=""; allowLyricRewind=false;
+}
+
+async function poll(){
+  const requestId=++pollRequestId;
+  try{
+    const d = MOCK ? mockState() : await getJSON("api/state",{cache:"no-store"});
+    if(requestId!==pollRequestId) return;
+    stateFailures=0;
+    if(d.ok && d.online){
+      const now=performance.now()/1000, k=keyOf(d), sameSong=!!d.title && k===curKey;
+      const incomingElapsed=typeof d.elapsed==="number" ? d.elapsed : NaN;
+      const validElapsed=Number.isFinite(incomingElapsed) && incomingElapsed>=0;
+      const nextStateTs=typeof d.ts==="number" ? d.ts : NaN;
+      if(isStaleStateTimestamp(nextStateTs,lastStateTs)) return;
+      const projectedElapsed=base.elapsed+(base.playing ? now-base.at : 0);
+      st=d;
+      const anchorElapsed=validElapsed ? incomingElapsed : (sameSong ? projectedElapsed : 0);
+      if(sameSong && shouldAllowLyricRewind(projectedElapsed,anchorElapsed,SEEK_BACK_S))
+        allowLyricRewind=true;
+      base={elapsed:anchorElapsed,at:now,playing:!!d.playing};
+      if(Number.isFinite(nextStateTs)) lastStateTs=nextStateTs;
+      $("title").textContent = (MOCK ? "🧪 " : "") + (d.title || (d.status==="Stopped"?"未在播放":"—"));
+      $("meta").textContent = [d.artist,d.album].filter(Boolean).join("  ·  ");
+      lyricInfo={...lyricInfo,title:d.title||"",artist:d.artist||"",album:d.album||"",duration:d.duration||0}; updateInfo();
+      if(d.title && k!==curKey){
+        curKey=k; curTitle=d.title; curArtist=d.artist||"";
+        const generation=++songGeneration;
+        onNewSong(d,generation);
+      }
+      if(!d.title){ clearCurrentSong(); setLyrics([]); showHint("未在播放音乐"); }
+    } else if(d.ok && !d.online){
+      st=null; clearCurrentSong(); $("title").textContent="—"; $("meta").textContent=""; setLyrics([]);
+      showHint("车辆休眠中 — 开始播放后自动显示");
+    } else { showHint("读取失败: "+(d.error||"?")); }
+  }catch(e){
+    if(requestId!==pollRequestId) return;
+    stateFailures+=1;
+    // Say what went wrong rather than leaving the previous hint on screen. Before the
+    // first successful poll that hint is the "waiting for playback" placeholder, which
+    // reads as an idle car instead of a failing request. A blip or two is tolerated
+    // first: lyrics keep scrolling on the local clock and there is nothing to act on.
+    if(!st || stateFailures>=STATE_FAIL_HINT_AFTER) showHint("状态读取失败: "+((e&&e.message)||e));
+  }
+}
+
+function mockState(){
+  const elapsed = (performance.now()/1000 - MOCK_STARTED_AT) % MOCK_DURATION;
+  return {ok:true,online:true,playing:true,status:"Playing",title:MOCK_ENGLISH?"Demo Song":"示例歌曲",artist:"示例歌手",album:"演示专辑",source:"Mock Player",elapsed,duration:MOCK_DURATION,ts:Date.now()/1000};
+}
+
+async function onNewSong(d,generation){
+  candidateRequestId+=1;
+  setLyrics([]); candidates=[]; candLoaded=false; candLoading=false; candFilter="all";
+  renderCands(); showHint("加载歌词…");
+  const p=readLocalPref(d.title,d.artist||"");
+  curSource = (p&&p.source)||"auto"; curOffset = +(p&&p.offset)||0;
+  updateCtl();
+  await loadLyrics();
+  if(generation!==songGeneration || keyOf(d)!==curKey) return;
+  // Candidate list resets on song change; refetch only if the source popup is open.
+  renderCands();
+  if($("srcpanel") && $("srcpanel").classList.contains("show")) loadCandidates();
+}
+
+async function loadCandidates(){
+  if(!curTitle) return;
+  const requestId=++candidateRequestId, generation=songGeneration, requestKey=curKey;
+  const requestTitle=curTitle, requestArtist=curArtist||"";
+  const requestDuration=Math.round((st&&st.duration)||0);
+  candLoading=true; candLoaded=false; candError=false; renderCands();   // show "正在查找…" immediately
+  let nextCandidates=[], nextCandError=false;
+  try{
+    const q=new URLSearchParams({title:requestTitle,artist:requestArtist,duration:requestDuration});
+    const j = await getJSON("api/candidates?"+q,{cache:"no-store"});
+    nextCandidates = (j.ok && j.candidates) ? j.candidates : [];
+  }catch(e){ nextCandError=true; }
+  if(requestId!==candidateRequestId || generation!==songGeneration || requestKey!==curKey) return;
+  candidates=nextCandidates; candError=nextCandError;
+  candLoading=false; candLoaded=true; renderCands();    // show results or "没有找到可选歌词"
+}
+
+async function loadLyrics(){
+  const requestId=++lyricRequestId;
+  const requestKey=curKey, requestTitle=curTitle, requestArtist=curArtist||"";
+  const requestSource=curSource, requestDuration=Math.round((st&&st.duration)||0);
+  if(MOCK){
+    if(requestId!==lyricRequestId || requestKey!==curKey) return;
+    lyricInfo={...lyricInfo,source:"mock",found:true,lineCount:MOCK_LINES.length,duration:MOCK_DURATION}; updateInfo();
+    setLyrics(MOCK_LINES, null, true); $("realsrc").textContent="· Mock";
+    if(showTrans) loadTranslations();
+    return;
+  }
+  try{
+    const q=new URLSearchParams({title:requestTitle,artist:requestArtist,duration:requestDuration,source:requestSource});
+    const j = await getJSON("api/lyrics?"+q,{cache:"no-store"});
+    if(requestId!==lyricRequestId || requestKey!==curKey || requestSource!==curSource) return;
+    if(j.ok && j.found){
+      lyricInfo={...lyricInfo,source:j.source||"—",found:true,lineCount:(j.lines||[]).length,duration:requestDuration}; updateInfo();
+      setLyrics(j.lines, j.furigana, j.translatable); $("realsrc").textContent = j.source?("· "+sourceName(j.source)):"";
+      if(showTrans && j.translatable!==false) loadTranslations();
+    }
+    else if(j.instrumental){ lyricInfo={...lyricInfo,source:"instrumental",found:false,lineCount:0,duration:requestDuration}; updateInfo(); setLyrics([]); showHint("🎵 纯音乐 · 无歌词"); $("realsrc").textContent="· 纯音乐"; }
+    else { lyricInfo={...lyricInfo,source:"—",found:false,lineCount:0,duration:requestDuration}; updateInfo(); setLyrics([]); showHint("未找到这首歌的歌词"); $("realsrc").textContent=""; }
+  }catch(e){
+    if(requestId!==lyricRequestId || requestKey!==curKey || requestSource!==curSource) return;
+    lyricInfo={...lyricInfo,source:"—",found:false,lineCount:0,duration:requestDuration}; updateInfo(); setLyrics([]); showHint("歌词加载失败");
+  }
+}
+
+function showHint(t){ $("hint").textContent=t; $("hint").style.display="flex"; }
+function setLyrics(lines, furi, translatable){
+  translationRequestId+=1; transLoading=false;
+  lyrics=lines||[]; furigana=furi||[]; translations=[]; transKey=""; curIdx=-1; allowLyricRewind=false;
+  // Furigana is always shown when available (no toggle). The 翻译 button only
+  // appears for tracks worth translating — Chinese lyrics report translatable=false.
+  const tb=$("trbtn"); if(tb){ tb.style.display = (lyrics.length && translatable!==false) ? "" : "none";
+    tb.textContent="翻译"; tb.classList.toggle("on", showTrans && lyrics.length>0); }
+  const sc=$("scroll"); sc.innerHTML="";
+  if(!lyrics.length) return;
+  $("hint").style.display="none";
+  renderLines();
+}
+// Rebuild #scroll from lyrics + (optional) furigana ruby + (optional) translation.
+function renderLines(){
+  const sc=$("scroll"); if(!sc) return;
+  sc.innerHTML="";
+  for(let i=0;i<lyrics.length;i++){
+    const txt=lyrics[i][1];
+    const e=document.createElement("div"); e.className="ln";
+    const main=document.createElement("div"); main.className="main";
+    if(furigana[i]) main.innerHTML=furigana[i];   // server-escaped ruby HTML (always on)
+    else main.textContent = txt || "♪";
+    e.appendChild(main);
+    if(showTrans && translations[i]){
+      const tr=document.createElement("div"); tr.className="tr"; tr.textContent=translations[i]; e.appendChild(tr);
+    }
+    sc.appendChild(e);
+  }
+  const n=sc.children;
+  if(curIdx>=0 && n[curIdx]) n[curIdx].classList.add("cur");
+  centerLine(curIdx>=0?curIdx:0);
+}
+async function loadTranslations(){
+  if(!lyrics.length || transLoading) return;
+  const requestId=++translationRequestId, generation=songGeneration, requestKey=curKey;
+  const requestLines=lyrics.map(l=>l[1]||""), requestTitle=curTitle;
+  const requestArtist=curArtist, requestSource=lyricInfo.source;
+  transLoading=true; const b=$("trbtn"); if(b){ b.classList.add("on"); b.textContent="翻译中…"; }
+  let nextTranslations=[];
+  try{
+    if(MOCK){ nextTranslations = requestLines.map(line=>"译: "+line); }
+    else{
+      const r = await getJSON("api/translate",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({lines:requestLines,title:requestTitle,artist:requestArtist,source:requestSource})});
+      nextTranslations = (r.ok && r.trans) ? r.trans : [];
+    }
+  }catch(e){}
+  if(requestId!==translationRequestId || generation!==songGeneration || requestKey!==curKey) return;
+  translations=nextTranslations; transKey=requestKey;
+  transLoading=false; if(b){ b.textContent="翻译"; b.classList.toggle("on", showTrans); }
+  renderLines();
+}
+
+function centerLine(i){
+  const n=$("scroll").children;
+  if(i>=0 && n[i]) $("scroll").style.transform="translateY(-"+(n[i].offsetTop+n[i].offsetHeight/2)+"px)";
+}
+
+function tick(){
+  if(st && lyrics.length){
+    const shift = curOffset + globalOffset;
+    let el = base.elapsed + (base.playing ? performance.now()/1000-base.at : 0) - shift;
+    if(st.duration) $("barfill").style.width = (100*Math.min(Math.max(el+shift,0),st.duration)/st.duration)+"%";
+    const canRewind=allowLyricRewind; allowLyricRewind=false;
+    const idx=lyricIndexFor(lyrics,el+LEAD,curIdx,canRewind);
+    if(idx<0){
+      const n=$("scroll").children;
+      if(curIdx>=0&&n[curIdx]) n[curIdx].classList.remove("cur");
+      curIdx=-1; centerLine(0);
+    }
+    else if(idx!==curIdx){
+      const n=$("scroll").children;
+      if(curIdx>=0&&n[curIdx]) n[curIdx].classList.remove("cur");
+      if(idx>=0&&n[idx]){ n[idx].classList.add("cur"); $("scroll").style.transform="translateY(-"+(n[idx].offsetTop+n[idx].offsetHeight/2)+"px)"; }
+      curIdx=idx;
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+function updateCtl(){
+  $("off").textContent = (curOffset>0?"+":"") + curOffset.toFixed(1) + "s";
+  if($("goff")) $("goff").textContent = (globalOffset>0?"+":"") + globalOffset.toFixed(1) + "s";
+  updateInfo();
+}
+
+function infoSkeleton(){
+  if(!$("infopanel") || $("infohead")) return;
+  $("infopanel").innerHTML = `<div id="infohead"></div>`+
+    `<div id="gstep"><div class="row step"><span class="lbl">全局延迟</span>`+
+    `<button id="gm" aria-label="全局提前 0.5 秒">−</button><span id="goff">${(globalOffset>0?"+":"") + globalOffset.toFixed(1)}s</span><button id="gp" aria-label="全局推后 0.5 秒">+</button></div>`+
+    `<div class="hint">所有歌都生效，歌词慢了按 −</div></div>`+
+    (REPORTS_ENABLED && !MOCK ? `<button id="reportbtn">歌词不对？提交反馈</button><div id="reportmsg"></div>` : "");
+}
+function srcSkeleton(){
+  if(!$("srcpanel") || $("candwrap")) return;
+  $("srcpanel").innerHTML =
+    `<div id="candbar"><b>歌词源</b><span id="candfilter"></span></div>`+
+    `<div id="candwrap"><div class="dim status">展开以查找</div></div>`;
+}
+
+// match-info popup (#infopanel) — refreshed every poll
+function updateInfo(){
+  if(!$("infopanel")) return;
+  infoSkeleton();
+  const src = lyricInfo.found ? sourceName(lyricInfo.source) : (lyricInfo.source==="instrumental" ? "纯音乐" : "未匹配");
+  const song = [lyricInfo.title, lyricInfo.artist].filter(Boolean).join(" — ") || "—";
+  $("infohead").innerHTML =
+    `<b>歌词匹配信息</b><br>`+
+    `<span class="dim">歌词源：</span>${esc(src)}<br>`+
+    `<span class="dim">歌曲：</span>${esc(song)}<br>`+
+    `<span class="dim">专辑：</span>${esc(lyricInfo.album||'—')}<br>`+
+    `<span class="dim">时长：</span>${fmtTime(lyricInfo.duration)}<br>`+
+    `<span class="dim">歌词行数：</span>${lyricInfo.lineCount||0}<br>`+
+    `<span class="dim">时间微调：</span>${(curOffset>0?"+":"") + curOffset.toFixed(1)}s`;
+}
+
+// candidate-source popup (#srcpanel) — rebuilt only on load/filter/select (NOT every
+// poll) so the scroll position isn't reset; 2-column grid; per-source filter chips.
+function renderCands(){
+  if(!$("srcpanel")) return;
+  srcSkeleton();
+  if($("srcbtn")) $("srcbtn").textContent = "可选歌词源" + (candidates.length ? ` (${candidates.length})` : "");
+  const srcs=[...new Set(candidates.map(c=>c.source))];
+  if(candidates.length && srcs.length>1){
+    const chip=(v,label)=>`<button class="fchip${candFilter===v?' on':''}" data-f="${esc(v)}">${esc(label)}</button>`;
+    $("candfilter").innerHTML = chip("all","全部")+srcs.map(s=>chip(s,sourceName(s))).join("");
+    for(const b of $("candfilter").querySelectorAll(".fchip")) b.onclick=(e)=>{ e.stopPropagation(); candFilter=b.dataset.f; renderCands(); };
+  } else if($("candfilter")) $("candfilter").innerHTML="";
+  const list = candidates.filter(c=>candFilter==="all"||c.source===candFilter);
+  $("candwrap").innerHTML = list.length ? list.map(c=>
+    `<button class="cand${curSource===c.id?' on':''}" data-id="${esc(c.id)}">`+
+    `<b>${esc(sourceName(c.source))}</b> · ${esc(c.title||'—')}<br>`+
+    `<span class="dim">${esc(c.artist||'—')} · ${esc(c.album||'—')} · ${fmtTime(c.duration)} · 相关度 ${esc(Number.isFinite(Number(c.score)) ? Number(c.score) : 0)}</span>`+
+    `</button>`).join("")
+    : candLoading ? `<div class="dim status">正在查找候选歌词…</div>`
+    : candError ? `<div class="dim status">候选歌词加载失败</div>`
+    : candLoaded ? `<div class="dim status">没有找到可选歌词</div>`
+    : `<div class="dim status">展开以查找</div>`;
+  for(const b of $("candwrap").querySelectorAll(".cand")) b.onclick=(e)=>{ e.stopPropagation(); selectCandidate(b.dataset.id); };
+}
+
+async function selectCandidate(id){
+  if(!id || id==="mock") return;
+  curSource=id; updateCtl(); savePrefs(); $("srcpanel").classList.remove("show"); showHint("加载选择的歌词…"); await loadLyrics();
+}
+function savePrefs(){
+  if(curTitle) writeLocalPref(curTitle,curArtist,curSource,curOffset);
+}
+$("infobtn").onclick=()=>{ const show=$("infopanel").classList.toggle("show"); if(show){ if($("srcpanel"))$("srcpanel").classList.remove("show"); updateInfo(); } };
+$("srcbtn").onclick=()=>{ const show=$("srcpanel").classList.toggle("show"); if(show){ if($("infopanel"))$("infopanel").classList.remove("show"); if(!candLoaded && !candLoading && curTitle) loadCandidates(); else renderCands(); } };
+document.addEventListener("click",e=>{ if(!e.target.closest(".info")){ if($("infopanel"))$("infopanel").classList.remove("show"); if($("srcpanel"))$("srcpanel").classList.remove("show"); } });
+$("om").onclick=()=>{ curOffset=Math.max(-10,Math.round((curOffset-STEP)*10)/10); allowLyricRewind=true; updateCtl(); savePrefs(); };
+$("op").onclick=()=>{ curOffset=Math.min(10,Math.round((curOffset+STEP)*10)/10); allowLyricRewind=true; updateCtl(); savePrefs(); };
+function setGlobalOffset(v){
+  globalOffset=Math.max(-5,Math.min(5,Math.round(v*10)/10)); allowLyricRewind=true; updateCtl();
+  fetch("api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({globalOffset})}).catch(()=>{});
+}
+$("infopanel").onclick=e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  if(b.id==="gm") setGlobalOffset(globalOffset-STEP); else if(b.id==="gp") setGlobalOffset(globalOffset+STEP);
+  else if(b.id==="reportbtn") sendReport(b);
+};
+// 「歌词不对」: the server files a GitHub issue (track, source, offset; nothing personal)
+async function sendReport(btn){
+  if(!curTitle) return;
+  const msg=$("reportmsg"); btn.disabled=true; if(msg) msg.textContent="提交中…";
+  try{
+    const r=await fetch("api/report",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      title:curTitle, artist:curArtist, duration:+lyricInfo.duration||0, source:lyricInfo.source==="—"?"":String(lyricInfo.source||""),
+      found:!!lyricInfo.found, lineCount:+lyricInfo.lineCount||0, offset:Math.round((curOffset+globalOffset)*10)/10})});
+    const j=await r.json().catch(()=>({}));
+    if(msg) msg.textContent = j.ok ? (j.duplicate ? "这首今天已经报过了" : "已提交，谢谢") : (j.error==="too_many_reports" ? "今天提交的反馈太多了，明天再试" : "提交失败");
+  }catch(e){ if(msg) msg.textContent="提交失败"; }
+  finally{ btn.disabled=false; }
+}
+getJSON("api/settings",{cache:"no-store"}).then(d=>{ if(d && Number.isFinite(+d.globalOffset)){ globalOffset=+d.globalOffset; updateCtl(); } }).catch(()=>{});
+$("trbtn").onclick=()=>{ showTrans=!showTrans; $("trbtn").classList.toggle("on", showTrans);
+  if(showTrans && (transKey!==curKey || !translations.length)) loadTranslations(); else renderLines(); };
+
+// tiny "actual source" note appended to meta line
+const rs=document.createElement("span"); rs.id="realsrc"; rs.style.cssText="color:var(--note);font-size:12px;margin-left:8px;"; $("meta").after(rs);
+
+// Tesla in-car browser should expose the vehicle UI's day/night choice via prefers-color-scheme.
+// Keep the document color-scheme live so built-in controls and address-bar chrome follow it too.
+const themeMQ = window.matchMedia && window.matchMedia("(prefers-color-scheme: light)");
+function syncTheme(){ document.documentElement.style.colorScheme = themeMQ && themeMQ.matches ? "light" : "dark"; }
+if(themeMQ){ syncTheme(); (themeMQ.addEventListener||themeMQ.addListener).call(themeMQ, "change", syncTheme); }
+
+// --- Adaptive polling to minimise Owner API (vehicle_data) calls. Lyrics scroll
+// locally via tick(), so /api/state only needs refreshing to catch a song change
+// or a pause. Poll densely only as the track nears its end (imminent switch),
+// sparsely mid-track (still catches a manual skip within ~POLL_MID), and not at
+// all while the page/tab is hidden. ---
+const POLL_NEAR=3000, POLL_SOON=3000, POLL_MID=3000, POLL_IDLE=3000, NEAR_S=10, SOON_S=30;
+let pollTimer=null;
+function nextDelay(){
+  if(document.hidden) return null;             // hidden: resume on visibilitychange
+  if(!st || !base.playing) return POLL_IDLE;   // offline/asleep or paused: position frozen
+  const el = base.elapsed + (performance.now()/1000 - base.at);
+  const remain = (st.duration||0) - el;
+  if(!st.duration) return POLL_MID;
+  if(remain <= NEAR_S) return POLL_NEAR;       // about to switch (or already overran)
+  if(remain <= SOON_S) return POLL_SOON;
+  return POLL_MID;
+}
+function scheduleNext(){ clearTimeout(pollTimer); const d=nextDelay(); if(d!=null) pollTimer=setTimeout(runPoll,d); }
+async function runPoll(){ await poll(); scheduleNext(); }
+requestAnimationFrame(tick); runPoll();
+document.addEventListener("visibilitychange",()=>{ if(document.hidden) clearTimeout(pollTimer); else runPoll(); });
+</script></body></html>
