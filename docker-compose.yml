@@ -1,0 +1,88 @@
+# tesla-hub: synced lyrics and a bilibili mirror for the Tesla in-car browser.
+#
+#   cp .env.example .env        # then fill it in
+#   docker compose up -d --build
+#
+# Both services listen on BIND_ADDR (127.0.0.1 by default) and have no login of their
+# own: publish them only through a reverse proxy with authentication (see deploy/).
+# The in-car menu (menu/) is a static page served by that reverse proxy.
+# Host-specific additions (e.g. an oauth2-proxy) belong in docker-compose.override.yml.
+name: tesla-hub
+
+x-hardening: &hardening
+  restart: unless-stopped
+  init: true
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  logging: {driver: json-file, options: {max-size: "10m", max-file: "3"}}
+
+services:
+  lyrics:
+    <<: *hardening
+    build: ./lyrics
+    image: tesla-hub-lyrics:latest
+    container_name: tesla-hub-lyrics
+    user: "10001:10001"
+    stop_grace_period: 70s
+    environment:
+      TM_DB_HOST: ${TM_DB_HOST:-database}
+      TM_DB_NAME: ${TM_DB_NAME:-teslamate}
+      TM_DB_USER: ${TM_DB_USER:-teslamate}
+      TM_DB_PASS: ${TM_DB_PASS:-}
+      TM_ENCRYPTION_KEY: ${TM_ENCRYPTION_KEY:-}
+      TESLA_VIN: ${TESLA_VIN:-}
+      TRANSLATE_TARGET_LANG: ${TRANSLATE_TARGET_LANG:-zh-CN}
+      REPORT_GITHUB_REPO: ${REPORT_GITHUB_REPO:-}
+      REPORT_GITHUB_TOKEN: ${REPORT_GITHUB_TOKEN:-}
+      REPORT_GITHUB_LABEL: ${REPORT_GITHUB_LABEL:-lyrics-mismatch}
+    volumes:
+      - ./data/lyrics:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m,mode=1777
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${LYRICS_PORT:-8475}:8475"
+    networks: [default, teslamate]
+    cpus: "1.0"
+    mem_limit: 512m
+    pids_limit: 64
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8475/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  bili:
+    <<: *hardening
+    build: ./bili
+    image: tesla-hub-bili:latest
+    container_name: tesla-hub-bili
+    user: "10002:10002"
+    environment:
+      DATA_DIR: /data
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      MENU_URL: ${MENU_URL:-}
+      LOCAL_COOKIES: ${LOCAL_COOKIES:-_oauth2_proxy}
+      UPSTREAM_LANG: ${UPSTREAM_LANG:-zh-CN,zh;q=0.9}
+    volumes:
+      - ./data/bili:/data
+    tmpfs:
+      - /tmp
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${BILI_PORT:-8490}:8080"
+    cpus: "2.0"
+    mem_limit: 768m
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/__bili/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # TeslaMate's network: the lyrics service reads TeslaMate's database (Tesla token, cars).
+  teslamate:
+    external: true
+    name: ${TESLAMATE_NETWORK:-teslamate_default}

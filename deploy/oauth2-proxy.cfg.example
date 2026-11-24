@@ -1,0 +1,32 @@
+# Example oauth2-proxy configuration protecting both tesla-hub host names with any
+# OpenID Connect provider. Secrets (client secret, cookie secret) go into the
+# environment (OAUTH2_PROXY_CLIENT_SECRET, OAUTH2_PROXY_COOKIE_SECRET), not here.
+
+http_address      = "127.0.0.1:4180"
+reverse_proxy     = true
+provider          = "oidc"
+oidc_issuer_url   = "https://login.example.com"
+client_id         = "tesla-hub"
+scope             = "openid profile email"
+code_challenge_method = "S256"
+# redirect_url is derived from the request host: register
+#   https://car.example.com/oauth2/callback and https://bilibili.example.com/oauth2/callback
+# with your provider.
+
+# Who may sign in: a list of e-mail addresses, or a group claim
+authenticated_emails_file = "/etc/oauth2-proxy/emails.txt"
+# oidc_groups_claim = "groups"
+# allowed_groups    = ["admins"]
+
+# One session for both host names
+cookie_domains    = [".example.com"]
+whitelist_domains = [".example.com"]
+cookie_secure     = true
+cookie_httponly   = true
+cookie_samesite   = "lax"
+# The car browser should rarely ask for a login again
+cookie_expire     = "720h"
+cookie_refresh    = "1h"
+
+set_xauthrequest = true
+upstreams        = ["static://202"]

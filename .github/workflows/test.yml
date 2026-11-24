@@ -1,0 +1,38 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Lyrics tests
+        env:
+          DISABLE_MXM_WARMUP: "1"
+        run: |
+          pip install -r lyrics/requirements.txt
+          python lyrics/tests/run_security_hardening_test.py
+          python lyrics/tests/run_candidate_filter_test.py
+          node lyrics/tests/run_lyrics_sync_test.js
+      - name: Syntax of the mirror and the page scripts
+        run: |
+          pip install -r bili/requirements.txt
+          python -m py_compile bili/app.py
+          node --check bili/static/boot.js
+          node --check bili/static/player.js
+      - name: Compose file
+        run: |
+          cp .env.example .env
+          docker compose config -q

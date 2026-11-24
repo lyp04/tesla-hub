@@ -1,0 +1,23 @@
+# Configuration of an installation (secrets, host names)
+.env
+.env.*
+!.env.example
+*.env
+docker-compose.override.yml
+menu/menu-config.js
+
+# Runtime data: bilibili login cookies, lyrics settings, caches
+data/
+
+# Browser test harness
+test/node_modules/
+test/out/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Local copies of the deploy examples
+deploy/oauth2-proxy.cfg
+deploy/emails.txt
